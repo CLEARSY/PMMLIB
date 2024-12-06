@@ -1,0 +1,660 @@
+/**
+ * A parser for the pmm files
+ */
+#include "pmmtree/BNode.h"
+#include "pmmtree/ErrorHandler.h"
+#include "pmmtree/ParenthesisAttribute.h"
+#include "PmmFactory.h"
+
+COMPILER PmmFileNode
+/* arbitrary C++ code */
+
+    theory::PmmFactory *factory;
+
+    /**
+     * The variable that holds the result of the Parse
+     */
+	PmmFile *parsedFile;
+
+  	std::string getString(wchar_t *s)
+  	{
+  		std::string res;
+  		while(*s != '\0')
+  		{
+  			res.push_back((char)*s);
+  			++s;
+  		}
+  		return res;
+  	}
+
+
+  	TokenValue getTokenValue()
+  	{
+		TokenValue result;
+
+		result.value = getString(t->val);
+                result.pos.setPos(getLine(), getCol());
+
+		return result;
+	}
+
+        void addParenthesisAttribute(theory::BNode *node, const TokenValue& left, const TokenValue& right)
+        {
+            if(node)
+            {
+                char val = '(';
+                if(left.value.size() > 0)
+                {
+                   val = left.value[0];
+                }
+                ParenthesisAttribute *attr = new ParenthesisAttribute(val, left.pos, right.pos);
+                node->addAttribute(attr);
+            }
+        }
+
+	int getLine()
+	{
+		// uses line numbers that starts at 1 instead of 0
+		return t->line;
+	}
+
+	int getCol()
+	{
+		// uses line numbers that starts at 1 instead of 0
+		return t->col;
+	}
+
+	bool isBracketsFormula()
+	{
+		scanner->ResetPeek();
+  		int depth = 0;
+  		if(la->kind != _lbracket)
+  		{
+  			return false;
+  		}
+  		while(depth >= 0)
+  		{
+  			t = scanner->Peek();
+  			if(t->kind == _EOF)
+  			{
+  				return false;
+  			}
+  			if(t->kind == _lbracket)
+  			{
+  				++depth;
+  			}
+  			else if(t->kind == _rbracket)
+  			{
+  				--depth;
+  			}
+  			else if(t->kind == _assign && depth == 0)
+  			{
+  				return true;
+  			}
+  		}
+		return false;
+	}
+
+CHARACTERS
+  letter    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_".
+  digit     = "0123456789".
+  cr        = '\r'.
+  lf        = '\n'.
+  tab       = '\t'.
+  stringCh  = ANY - '"' - '\\' - cr - lf.
+  printable = '\u0020' .. '\u007e'.
+  hex       = "0123456789abcdef".
+  other = ANY - '/' - '*'.
+
+TOKENS
+  ident     = (letter { letter | digit }|'?').
+  number    = digit { digit }.
+  realnumber= digit { digit }'.'digit { digit }.
+  string    = '"' { stringCh | '\\' printable } '"'.
+
+  lparen = "(".
+  rparen = ")".
+  lbracket = "[".
+  rbracket = "]".
+  assign = ":=".
+
+COMMENTS FROM "/*" TO "*/"
+COMMENTS FROM "//" TO lf
+
+// AR: using this may creates comments that exceed the maximum token
+//  value
+//PRAGMAS
+//  comment = "/*" {'/' | other | '*' {'*'} other} '*' {'*'} '/'.
+
+IGNORE cr + lf + tab
+
+/*--------------------------------------------------------------------*/
+
+PRODUCTIONS
+
+PmmFileNode
+(.
+	TheoryNode *current = 0;
+	TheoryNode *nxt = 0;
+	parsedFile = factory->createPmm();
+ .)
+=
+	//A pmm file can be empty
+	[
+		Theory<current> (. parsedFile->setChild(current); .)
+		{
+                        "&" (. current->setAndTokenPos(getTokenValue().pos); .)
+                        Theory<nxt> (. if(current) { current = (TheoryNode*)current->setSibling(nxt); } .)
+		}
+	]
+.
+
+Theory<TheoryNode *&result>
+(. TokenValue theoryToken; .)
+=
+	// TODO check begin and end indent are the same
+	"THEORY" (. theoryToken = getTokenValue(); .)
+	ident (. result = factory->createTheory(getTokenValue()); .)
+	[ "IS" Rules<result>  ]
+	"END" (. result->setTheoryTokenPos(theoryToken.pos);
+	         result->setEndTokenPos(getTokenValue().pos); .)
+|	"`" ident        (. result = factory->createTheory(getTokenValue()); .)
+.
+
+Rules<TheoryNode *th>
+(. BNode *rule = 0;
+   BNode *nxt = 0;
+ .)
+=
+        Implication<rule>        (. if(th) { th->setChild(rule); } .)
+        { ";" Implication<nxt>   (. if(rule) { rule = rule->setSibling(nxt); } .)
+	}
+.
+
+
+
+SubstitutionFormula<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula10<result>
+	[
+		":=" (. t = getTokenValue(); .)
+		Formula10<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	]
+.
+
+Formula10<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula20<result>
+	{
+		"|" (. t = getTokenValue(); .)
+		Formula20<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula20<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+        Implication<result> {
+		(";"|"||")     (. t = getTokenValue(); .)
+                Implication<nxt>   (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+
+Implication<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Conjunction<result>
+	{
+		"=>" (. t = getTokenValue(); .)
+		Conjunction<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Conjunction<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+ =
+        Formula50<result>
+	{
+		("&"|"or"
+		|"_and"|"_or")     (. t = getTokenValue(); .)
+                Formula50<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula50<BNode*&result>
+(. BNode *rewrite = 0;
+   TokenValue t;
+ .)
+=
+        Formula60<result>
+        {
+                "=="                 (. t = getTokenValue(); .)
+                Formula60<rewrite> (. result = factory->createBinaryOperator(t, result, rewrite); .)
+        }
+.
+
+
+
+Formula60<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula110<result>
+	[
+		(":"|"<=>"|"=")  (. t = getTokenValue(); .)
+		Formula110<nxt>  (. result = factory->createBinaryOperator(t, result, nxt); .)
+	]
+.
+
+Formula110<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+ =
+	Formula115<result>
+	{
+		("<:"|"<<:"|"/<:"|"/<<:") (. t = getTokenValue(); .)
+		Formula115<nxt>           (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula115<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula120<result>
+	{
+		"," (. t = getTokenValue(); .)
+		Formula120<nxt>  (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula120<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+ =
+	Formula160<result>
+	{
+		("+->"|"+->>"|"-->"|"-->>"|"<->"|">+>"|">->"|">+>>"|">->>")
+		                (. t = getTokenValue(); .)
+		Formula160<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula160<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula170<result>
+	{
+                ("\\"|"->"|"/:"|"/="|"/\\"|"/|\\"|"<"|"<."|"<+"|"<<<"|"<-"|"<<|"|"<="|"<=."|"rle"|"rlt"|"rge"|"rgt"|"<|"|">"|">."|"><"|">="|">=."|"\\/"|"\\|/"|"^"|"|->"|"|>"|"|>>")
+		                (. t = getTokenValue(); .)
+		Formula170<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula170<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula175<result>
+	{
+		(">>")          (. t = getTokenValue(); .)
+		Formula175<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+
+Formula175<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula180<result>
+	{
+		("..")          (. t = getTokenValue(); .)
+		Formula180<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+
+Formula180<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula190<result>
+	{
+                ("+"|"+."|"-"|"-."|"rplus"|"rminus")       (. t = getTokenValue(); .)
+		Formula190<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula190<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula200<result>
+	{
+                ("*"|"*."|"/"|"/."|"rdiv"|"mod"|"rmul") (. t = getTokenValue(); .)
+		Formula200<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula200<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	Formula210<result>
+	{
+                ("**"|"rpow") (. t = getTokenValue(); .)
+		Formula210<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula210<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+	"-" (. t = getTokenValue(); .)
+	Formula220<nxt>  (. result = factory->createUnaryOperator(t, nxt, false); .)
+|	Formula220<result>
+.
+
+Formula220<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+        Formula240<result>
+	{
+		"." (. t = getTokenValue(); .)
+                Formula240<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+	}
+.
+
+Formula240<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+
+        Formula250<result>
+        {
+                "$" (. t = getTokenValue(); .)
+                Formula250<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+        }
+.
+
+Formula250<BNode*&result>
+(. BNode *nxt = 0;
+   TokenValue t;
+ .)
+=
+        Brackets<result>
+        {
+                "'" (. t = getTokenValue(); .)
+                Brackets<nxt> (. result = factory->createBinaryOperator(t, result, nxt); .)
+        }
+.
+
+Brackets<BNode *&result>
+(. BNode *formula = 0;
+   TokenValue t;
+ .)
+=
+	IF(isBracketsFormula())
+	"[" (. t = getTokenValue(); .)
+		SubstitutionFormula<result>
+	"]" (. result = factory->createParen(t, result); .)
+        {
+            IF(isBracketsFormula())
+            "[" (. t = getTokenValue(); .)
+                SubstitutionFormula<formula>
+            "]" (. formula = factory->createParen(t, formula);
+                   result = factory->createSubstitution(t, result, formula);
+                 .)
+        }
+	SimpleFormula<formula>  (. result = factory->createSubstitution(t, result, formula); .)
+|	SimpleFormula<result>
+.
+
+SimpleFormula<BNode*&result>
+(. BNode *args = 0;
+   TokenValue t;
+   TokenValue lp, rp; // Right and left parenthesis
+ .)
+=
+   (
+       "prj1"
+   |   "prj2")  (. t = getTokenValue(); .)
+   "("      (. lp = getTokenValue(); .)
+       Formula10<args>
+   ")"      (. rp = getTokenValue();
+               addParenthesisAttribute(args, lp, rp);
+               // Hack: use a special ",," operator instead of "," to change
+               // The coma priority
+               if(args->getValue() == ",")
+               {
+                  args->setValue(",,");
+               }
+               result = factory->createFctOperator(t, args);
+               .) {
+               "~"                      (. result = factory->createUnaryOperator(getTokenValue(), result, true); .)
+           |	"("                      (. t = getTokenValue(); .)
+                       Formula10<args>
+                       ")"      (. result = factory->createFctCall(t, result, args);
+                                   addParenthesisAttribute(args, t, getTokenValue());
+                                    .)
+           |	"["                      (. t = getTokenValue(); .)
+                       Formula10<args> "]"      (.
+                                                   addParenthesisAttribute(args, t, getTokenValue());
+                                                   result = factory->createRelCall(t, result, args);
+                                                .)
+           }
+|	(
+		"not"
+	|	"bool"
+	|	"max"
+	|	"min"
+    |       "rmin"
+    |       "rmax"
+	|	"card"
+	|	"dom"
+	|	"ran"
+	|	"POW"
+	|	"POW1"
+	|	"FIN"
+	|	"FIN1"
+	|	"union"
+	|	"inter"
+	|   "id"
+	|   "iterate"
+	|   "closure"
+	|   "closure1"
+	|   "fnc"
+	|   "rel"
+	|	"seq"
+	|	"seq1"
+	|	"iseq"
+	|	"iseq1"
+	|   "perm"
+	|	"size"
+	|   "first"
+	|   "last"
+    |   "front"
+    |   "tail"
+    |   "rev"
+	|   "conc"
+    |   "rec"
+    |   "struct"
+	)                            (. t = getTokenValue(); .)
+        "("      (. lp = getTokenValue(); .)
+            Formula10<args>
+        ")"      (. rp = getTokenValue();
+                    addParenthesisAttribute(args, lp, rp);
+                    result = factory->createFctOperator(t, args);
+                    .)
+	{
+		"~"                      (. result = factory->createUnaryOperator(getTokenValue(), result, true); .)
+	|	"("                      (. t = getTokenValue(); .)
+                Formula10<args>
+                ")"      (. result = factory->createFctCall(t, result, args);
+                            addParenthesisAttribute(args, t, getTokenValue());
+                             .)
+	|	"["                      (. t = getTokenValue(); .)
+                Formula10<args> "]"      (.
+                                            addParenthesisAttribute(args, t, getTokenValue());
+                                            result = factory->createRelCall(t, result, args);
+                                         .)
+	}
+|	ParenFormula<result>
+	{
+		"~"                      (. result = factory->createUnaryOperator(getTokenValue(), result, true); .)
+	|	"("                      (. t = getTokenValue(); .)
+                Formula10<args> ")"      (.
+                                            addParenthesisAttribute(args, t, getTokenValue());
+                                            result = factory->createFctCall(t, result, args);
+                                          .)
+	|	"["                      (. t = getTokenValue(); .)
+                Formula10<args> "]"      (.
+                                            addParenthesisAttribute(args, t, getTokenValue());
+                                            result = factory->createRelCall(t, result, args);
+                                          .)
+	}
+| 	QuantifiedFormula<result>
+     {
+             "~"                      (. result = factory->createUnaryOperator(getTokenValue(), result, true); .)
+     |	"("                      (. t = getTokenValue(); .)
+             Formula10<args> ")"      (.
+                                         addParenthesisAttribute(args, t, getTokenValue());
+                                         result = factory->createFctCall(t, result, args);
+                                       .)
+     |	"["                      (. t = getTokenValue(); .)
+             Formula10<args> "]"      (.
+                                         addParenthesisAttribute(args, t, getTokenValue());
+                                         result = factory->createRelCall(t, result, args);
+                                       .)
+     }
+.
+
+QuantifiedFormula<BNode *&result>
+(. TokenValue t;
+   BNode *formula;
+   BNode *args = 0;
+   .)
+=
+   ("!"|"#"|"%"|"SIGMA"|"PI"|"rSIGMA"|"rPI"|"UNION"|"INTER"|"SET") (. t = getTokenValue(); .)
+         ParenFormula<args> "." ParenBrackets<formula> (. result = factory->createQuantified(t, args, formula); .)
+.
+
+ParenBrackets<BNode *&result>
+(. TokenValue t;
+   BNode *formula;
+.)
+=
+    IF(isBracketsFormula())
+    "[" (. t = getTokenValue(); .)
+        SubstitutionFormula<result>
+    "]" (. result = factory->createParen(t, result); .)
+    QuantifiedParenFormula<formula>  (. result = factory->createSubstitution(t, result, formula); .)
+|	QuantifiedParenFormula<result>
+.
+
+QuantifiedParenFormula<BNode *&result>
+(. /* Special case for parsing unusual things such as !x.not(P), that sometimes
+      appears within rules */
+  TokenValue t, lp, rp;
+  BNode      *formula;
+.)
+=
+    "not"    (. t = getTokenValue(); .)
+    "("      (. lp = getTokenValue(); .)
+        Formula10<formula>
+    ")"      (. rp = getTokenValue();
+                addParenthesisAttribute(formula, lp, rp);
+                result = factory->createFctOperator(t, formula);
+                .)
+|   QuantifiedFormula<result>
+|   ParenFormula<result>
+.
+
+ParenFormula<BNode *&result>
+(.
+	BNode *f = 0;
+        BNode *g = 0;
+	TokenValue t;
+.)
+=
+	AtomicFormula<result>
+|	"("                   (. t = getTokenValue(); .)
+        Formula10<f> ")"      (. result = f; addParenthesisAttribute(result, t, getTokenValue()); .)
+	[
+		AtomicFormula<f>  (. t.value = "("; result = factory->createFctCall(t, result, f); .)
+	]
+|	"{"                       (. t = getTokenValue(); .)
+                Formula20<f>
+                [
+                    "|" Formula20<g>
+                ]
+         "}" (. if(!g) { result = factory->createParen(t, f); }
+                else   { TokenValue set(t);
+                         set.value = "SET";
+                         result = factory->createQuantified(set, f, g);
+                }
+                addParenthesisAttribute(result, t, getTokenValue());
+              .)
+	[
+		AtomicFormula<f>  (. t.value = "("; result = factory->createFctCall(t, result, f); .)
+	]
+|	"["                       (. t = getTokenValue(); .)
+                Formula10<result> "]" (. addParenthesisAttribute(result, t, getTokenValue());
+                                         result = factory->createParen(t, result);
+                                          .)
+	[
+		AtomicFormula<f>  (. t.value = "("; result = factory->createFctCall(t, result, f); .)
+	]
+.
+
+AtomicFormula<BNode*&result>
+(.
+  TokenValue t;
+  BNode *num;
+  .)
+=
+	number                (. result = factory->createInteger(getTokenValue()); .)
+|   realnumber            (. result = factory->createReal(getTokenValue()); .)
+|	ident                 (. result = factory->createIdent(getTokenValue()); .)
+        [ "$"                 (. t = getTokenValue(); .)
+          ( number              (. num = factory->createInteger(getTokenValue()); .)
+          | ident               (. num = factory->createIdent(getTokenValue());   .)
+          )                     (. result = factory->createBinaryOperator(t, result, num); .)
+        ]
+|	string                (. result = factory->createString(getTokenValue());   .)
+|	"[]"                  (. result = factory->createEmptySeq(getTokenValue()); .)
+|	"{}"                  (. result = factory->createEmptySet(getTokenValue()); .)
+.
+
+
+END PmmFileNode.
