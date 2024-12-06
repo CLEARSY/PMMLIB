@@ -1,6 +1,6 @@
 /******************************* CLEARSY **************************************
 This file is part of BPARSERS
-    Copyright (C) 2008 ClearSy (contact@clearsy.com)
+    Copyright © CLEARSY 2008-2020 (contact@clearsy.com)
 
     BPARSERS is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by

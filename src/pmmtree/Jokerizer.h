@@ -1,19 +1,19 @@
 /******************************* CLEARSY **************************************
-This file is part of BPARSERS
-    Copyright (C) 2018 ClearSy (contact@clearsy.com)
+This file is part of PMMLIB
+    Copyright © CLEARSY 2008-2020 (contact@clearsy.com)
 
-    BPARSERS is free software; you can redistribute it and/or modify
+    PMMLIB is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation; GNU General Public License version 3
     of the License
 
-    BPARSERS is distributed in the hope that it will be useful,
+    PMMLIB is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with BPARSERS; if not, write to the Free Software
+    along with PMMLIB; if not, write to the Free Software
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
 #ifndef JOKERIZER_H_
@@ -27,7 +27,7 @@ namespace theory
 {
     class BNode;
 
-    /** 
+    /**
 	@brief Performs jokerization on successive formulas
 
 	A jokerizer is created by giving as arguments the depth in
@@ -51,7 +51,7 @@ class Jokerizer {
 
 public:
 
-    /** 
+    /**
     @brief Constructor
 
     @param depth Depth where sub-terms are replaced by jokers.
@@ -80,7 +80,7 @@ public:
     @brief The next joker available
     @return The character for the next free joker.
     @note Jokers are created from 'a' to 'z' then 'A' to 'Z'.
-    */ 
+    */
     char nextJoker() const;
 
 private:
@@ -105,7 +105,7 @@ private:
        for different quantified variables or global operators.
     */
     void cancelBinding(const BNode* value);
-    
+
     /**
        @brief associates a new joker to term
        @param value the term to be associated with a joker
@@ -136,4 +136,3 @@ private:
 };
 
 #endif /*JOKERBINDING_H_*/
-

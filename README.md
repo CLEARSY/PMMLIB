@@ -14,12 +14,14 @@ This library uses CoCo/R to generate the parser for the language in PMM files.
 
 ## Contributing
 
-We welcome external contributors to b2smtlib!
+We welcome external contributors to PMMLIB.
 
 Please carefully read the CONTRIBUTING.md file in this repository in case you co
 nsider contributing.
 
 ## Licensing
+
+This code is Copyright © CLEARSY 2008-2020.
 
 This code is distributed under the license: "GNU GENERAL PUBLIC LICENSE, Version 3".
 See the LICENSE file in this repository.
